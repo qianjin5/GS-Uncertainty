@@ -1,0 +1,7 @@
+{
+    "resolution": 4,
+    "cap_max": 50000,
+    "init_type": "sfm",
+    "use_mcmc": true,
+    "use_depth": true
+}

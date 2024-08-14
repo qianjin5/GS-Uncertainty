@@ -311,3 +311,7 @@ class GaussianRasterizer(nn.Module):
 
         return color, alpha_integrated, color_integrated, point_coordinate, point_sdf, radii
 
+
+def compute_relocation(opacity_old, scale_old, N, binoms, n_max):
+    new_opacity, new_scale = _C.compute_relocation(opacity_old, scale_old, N.int(), binoms, n_max)
+    return new_opacity, new_scale 

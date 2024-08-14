@@ -41,7 +41,7 @@ class Scene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, init_type=args.init_type)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
@@ -60,9 +60,9 @@ class Scene:
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
-        # if shuffle:
-        #     random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
-        #     random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
+        if shuffle:
+            random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
+            random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 

@@ -332,14 +332,16 @@ namespace sibr
 #else
 		unsigned int len=0;
 
-		char result[PATH_MAX];
+		char result[PATH_MAX + 1];
 		ssize_t c = readlink("/proc/self/exe", result, PATH_MAX);
 		len = c;
 		const char* path;
-		if( c != -1 )
-			path = dirname(result);
-		else
+        if (c != -1) {
+            result[c] = '\0';
+            path = dirname(result);
+		} else {
 			SIBR_ERR  << "Cant find executable path  "<< std::endl;
+		}
 
 
 		std::string installDirectory(parentDirectory(path));

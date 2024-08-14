@@ -5,6 +5,8 @@ from matplotlib import cm
 import open3d as o3d
 import matplotlib.pyplot as plt
 import numpy as np
+import torchvision
+import cv2
 
 def apply_colormap(image, cmap="viridis"):
     colormap = cm.get_cmap(cmap)
@@ -14,31 +16,46 @@ def apply_colormap(image, cmap="viridis"):
     image_long_max = torch.max(image_long)
     assert image_long_min >= 0, f"the min value is {image_long_min}"
     assert image_long_max <= 255, f"the max value is {image_long_max}"
-    return colormap[image_long[..., 0]]
+    # apply color map to each pixel
+    colored_image = colormap[image_long].squeeze(0).permute(2, 0, 1)
+    return colored_image
 
 
 def apply_depth_colormap(
     depth,
-    accumulation,
+    accumulation = None,
     near_plane = 2.0,
     far_plane = 4.0,
     cmap="turbo",
 ):
-    # near_plane = near_plane or float(torch.min(depth))
-    # far_plane = far_plane or float(torch.max(depth))
-    near_plane = near_plane
-    far_plane = far_plane
+    near_plane = float(torch.min(depth))
+    far_plane = float(torch.max(depth))
+    #near_plane = near_plane
+    #far_plane = far_plane
 
     depth = (depth - near_plane) / (far_plane - near_plane + 1e-10)
     depth = torch.clip(depth, 0, 1)
     # depth = torch.nan_to_num(depth, nan=0.0) # TODO(ethan): remove this
-
     colored_image = apply_colormap(depth, cmap=cmap)
-
     if accumulation is not None:
         colored_image = colored_image * accumulation + (1 - accumulation)
 
     return colored_image
+
+def save_images(path_save, idx, rgb, depth):
+    # save to disk
+    torchvision.utils.save_image(rgb, path_save + f"{idx:05d}_rgb.png")
+    #torchvision.utils.save_image(depth, path_save + f"{idx:05d}_depth.png")
+    # save depth as uint16, val  = round(depth * 1000), save with cv2
+    depth_mm = depth * 1000
+    depth_np = depth_mm.permute(1, 2, 0).to("cpu").numpy().astype(np.uint16)
+    cv2.imwrite(path_save + f"{idx:05d}_depth.png", depth_np)
+    # also save colored depth
+    depth_colored = apply_depth_colormap(depth)
+    
+    torchvision.utils.save_image(depth_colored, path_save + f"{idx:05d}_depth_colored.png")
+  
+
 
 def save_points(path_save, pts, colors=None, normals=None, BRG2RGB=False):
     """save points to point cloud using open3d"""

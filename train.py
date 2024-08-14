@@ -10,12 +10,15 @@
 #
 
 import os
+import json
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
+from utils.vis_utils import save_images
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
+from scene.gaussian_model import build_scaling_rotation
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -59,6 +62,12 @@ def L1_loss_appearance(image, gt_image, gaussians, view_idx, return_transformed_
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+    
+    if dataset.cap_max == -1:
+        print("Please specify the maximum number of Gaussians using --cap_max.")
+        exit()
+    print("Training with {} maximum Gaussians".format(dataset.cap_max))
+    
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
@@ -88,7 +97,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
-    for iteration in range(first_iter, opt.iterations + 1):        
+    for iteration in range(first_iter, opt.iterations + 1):
+        '''        
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:
@@ -103,10 +113,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     break
             except Exception as e:
                 network_gui.conn = None
+        '''
 
         iter_start.record()
 
-        gaussians.update_learning_rate(iteration)
+        xyz_lr = gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
@@ -123,13 +134,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         reg_kick_on = iteration >= opt.regularization_from_iter
         
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, require_coord = require_coord and reg_kick_on, require_depth = require_depth and reg_kick_on)
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, require_coord = require_coord and reg_kick_on, require_depth = args.use_depth and require_depth and reg_kick_on)
         rendered_image: torch.Tensor
-        rendered_image, viewspace_point_tensor, visibility_filter, radii = (
+        rendered_image, rendered_depth, viewspace_point_tensor, visibility_filter, radii = (
                                                                     render_pkg["render"], 
+                                                                    render_pkg["expected_depth"], 
                                                                     render_pkg["viewspace_points"], 
                                                                     render_pkg["visibility_filter"], 
                                                                     render_pkg["radii"])
+        
         gt_image = viewpoint_cam.original_image.cuda()
 
         if dataset.use_decoupled_appearance:
@@ -137,10 +150,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         else:
             Ll1_render = l1_loss(rendered_image, gt_image)
 
-        
         if reg_kick_on:
             lambda_depth_normal = opt.lambda_depth_normal
-            if require_depth:
+            if args.use_depth and require_depth:
                 rendered_expected_depth: torch.Tensor = render_pkg["expected_depth"]
                 rendered_median_depth: torch.Tensor = render_pkg["median_depth"]
                 rendered_normal: torch.Tensor = render_pkg["normal"]
@@ -159,7 +171,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             
         rgb_loss = (1.0 - opt.lambda_dssim) * Ll1_render + opt.lambda_dssim * (1.0 - ssim(rendered_image, gt_image.unsqueeze(0)))
         
-        loss = rgb_loss + depth_normal_loss * lambda_depth_normal
+        loss = rgb_loss
+        
+        if args.use_depth:
+            loss = loss + depth_normal_loss * lambda_depth_normal
+
+        if args.use_mcmc:
+            loss = loss + args.opacity_reg * torch.abs(gaussians.get_opacity).mean()
+            loss = loss + args.scale_reg * torch.abs(gaussians.get_scaling).mean()
+
+
         loss.backward()
 
         iter_end.record()
@@ -181,33 +202,59 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
 
-            # Densification
-            if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.05, scene.cameras_extent, size_threshold)
+            # Densification
+            if not args.use_mcmc:
+                if iteration < opt.densify_until_iter:
+                    # Keep track of max radii in image-space for pruning
+                    gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                    gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+
+                    if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+                        size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+                        gaussians.densify_and_prune(opt.densify_grad_threshold, 0.05, scene.cameras_extent, size_threshold)
+                        if dataset.disable_filter3D:
+                            gaussians.reset_3D_filter()
+                        else:
+                            gaussians.compute_3D_filter(cameras=trainCameras)
+
+                    if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
+                        gaussians.reset_opacity()
+            else:
+                if iteration < opt.densify_until_iter and iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+                    gaussians.prune_low_opacity(0.005, use_mcmc=args.use_mcmc)
+                    
+                    dead_mask = (gaussians.get_opacity <= 0.05).squeeze(-1)
+                    gaussians.relocate_gs(dead_mask=dead_mask)
+
+                    gaussians.add_new_gs(cap_max=args.cap_max)
                     if dataset.disable_filter3D:
                         gaussians.reset_3D_filter()
                     else:
-                        gaussians.compute_3D_filter(cameras=trainCameras)
-
-                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+                        gaussians.compute_3D_filter(cameras=trainCameras)  
                 
             if iteration % 100 == 0 and iteration > opt.densify_until_iter and not dataset.disable_filter3D:
                 if iteration < opt.iterations - 100:
                     # don't update in the end of training
                     gaussians.compute_3D_filter(cameras=trainCameras)
-
+            if iteration % 100 == 0:
+                save_images(scene.model_path + "/images/", iteration, rendered_image, rendered_depth)
 
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+
+            if args.use_mcmc:
+                    L = build_scaling_rotation(gaussians.get_scaling, gaussians.get_rotation)
+                    actual_covariance = L @ L.transpose(1, 2)
+
+                    def op_sigmoid(x, k=100, x0=0.995):
+                        return 1 / (1 + torch.exp(-k * (x - x0)))
+                    
+                    noise = torch.randn_like(gaussians._xyz) * (op_sigmoid(1- gaussians.get_opacity))*args.noise_lr*xyz_lr
+                    noise = torch.bmm(actual_covariance, noise.unsqueeze(-1)).squeeze(-1)
+                    gaussians._xyz.add_(noise)
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -224,6 +271,7 @@ def prepare_output_and_logger(args):
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
     os.makedirs(args.model_path, exist_ok = True)
+    os.makedirs(args.model_path+'/images', exist_ok = True)
     with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
         cfg_log_f.write(str(Namespace(**vars(args))))
 
@@ -273,9 +321,14 @@ def training_report(tb_writer, iteration, Ll1, loss, normal_loss, l1_loss, elaps
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
 
         if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
+            #tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
+
+def load_config(config_file):
+    with open(config_file, 'r') as file:
+        config = json.load(file)
+    return config
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -283,19 +336,40 @@ if __name__ == "__main__":
     lp = ModelParams(parser)
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
-    parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=6009)
+    #parser.add_argument('--ip', type=str, default="127.0.0.1")
+    #parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--config', type=str, default=None)
+    parser.add_argument('--use_mcmc', type=bool, default=True)
+    parser.add_argument('--use_depth', type=bool, default=True)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[5_00, 10_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[5_00, 10_000])
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[15000])
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[10_000])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
+
+    
+    if args.config is not None:
+        # Load the configuration file
+        config = load_config(args.config)
+        # Set the configuration parameters on args, if they are not already set by command line arguments
+        for key, value in config.items():
+            setattr(args, key, value)
+    
     args.save_iterations.append(args.iterations)
     
     print("Optimizing " + args.model_path)
+    if args.use_mcmc:
+        print("    Using MCMC")
+    else:
+        print("    Not using MCMC")
+
+    if args.use_depth:
+        print("    Using depth")
+    else:
+        print("    Not using depth")
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
