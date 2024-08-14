@@ -35,11 +35,13 @@ pip install -e .
 ```
 
 4. install viewer (in new terminal, do not activate conda)
+```
 sudo apt install -y libglew-dev libassimp-dev libboost-all-dev libgtk-3-dev libopencv-dev libglfw3-dev libavdevice-dev libavcodec-dev libeigen3-dev libxxf86vm-dev libembree-dev
 
 cd SIBR_viewers
 cmake -Bbuild . -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j24 --target install
+```
 
 # 2. Preparation
 Download nerf_synthetic and nerf_llff_data datasets.
