@@ -55,7 +55,9 @@ def save_images(path_save, idx, rgb, depth):
     
     torchvision.utils.save_image(depth_colored, path_save + f"{idx:05d}_depth_colored.png")
   
-
+def save_uncertainty_image(path_save, idx, uncertainty):
+    depth_uncertainty_colored = apply_depth_colormap(uncertainty)
+    torchvision.utils.save_image(depth_uncertainty_colored, path_save + f"{idx:05d}_depth_uncertainty.png")
 
 def save_points(path_save, pts, colors=None, normals=None, BRG2RGB=False):
     """save points to point cloud using open3d"""

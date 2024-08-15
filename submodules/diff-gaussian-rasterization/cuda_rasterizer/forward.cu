@@ -425,7 +425,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
-template <uint32_t CHANNELS, bool COORD, bool DEPTH, bool NORMAL>
+template <uint32_t CHANNELS, bool COORD, bool DEPTH, bool NORMAL, bool DEPTH_SIGMA2>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
 	const uint2* __restrict__ ranges,
@@ -450,6 +450,7 @@ renderCUDA(
 	float* __restrict__ out_normal,
 	float* __restrict__ out_depth,
 	float* __restrict__ out_mdepth,
+	float* __restrict__ out_depth_sigma2,
 	float* __restrict__ accum_coord,
 	float* __restrict__ accum_depth,
 	float* __restrict__ normal_length
@@ -500,6 +501,7 @@ renderCUDA(
 	float mCoord[3] = { 0 };
 	float Depth = 0;
 	float mDepth = 0;
+	float Depth_sigma2 = 0;
 	float Normal[3] = {0};
 	float last_depth = 0;
 	float last_weight = 0;
@@ -624,6 +626,53 @@ renderCUDA(
 			// pixel.
 			last_contributor = contributor;
 		}
+
+		// Now calculate the depth uncertainty along the ray
+		
+		if constexpr (DEPTH_SIGMA2) {
+			done = false;
+			float T_U = 1.0f;
+			float exp_depth = Depth / (ln * weight);
+			// Iterate over current batch again
+			for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
+			{
+				if (!last_contributor) {
+					done = true;
+					continue;
+				}
+				// Resample using conic matrix (cf. "Surface 
+				// Splatting" by Zwicker et al., 2001)
+				float2 xy = collected_xy[j];
+				float2 d = { xy.x - pixf.x, xy.y - pixf.y };
+				float4 con_o = collected_conic_opacity[j];
+				float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+				if (power > 0.0f){
+					continue;
+				}
+					
+				float alpha = min(0.99f, con_o.w * exp(power));
+				if (alpha < 1.0f / 255.0f)
+					continue;
+				float test_T = T_U * (1 - alpha);
+				if (test_T < 0.0001f)
+				{
+					done = true;
+					continue;
+				}
+
+				const float aT = alpha * T_U;
+
+				float t_center = collected_ts[j];
+				float2 ray_plane = collected_ray_planes[j];
+				float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
+
+				float curr_depth = t / (ln * weight);
+
+				Depth_sigma2 += (exp_depth - curr_depth) * (exp_depth - curr_depth) * aT * aT;
+	
+				T_U = test_T;
+			}
+		}
 	}
 
 	// All threads that treat valid pixel write out their final
@@ -672,6 +721,18 @@ renderCUDA(
 			out_mdepth[pix_id] = mDepth/ln;
 		}
 
+		if constexpr (DEPTH_SIGMA2)
+		{
+			if(last_contributor)
+			{
+				out_depth_sigma2[pix_id] = Depth_sigma2;
+			}
+			else
+			{
+				out_depth_sigma2[pix_id] = 0;
+			}
+		}
+
 		if constexpr (NORMAL)
 		{
 			if(last_contributor)
@@ -716,27 +777,33 @@ void FORWARD::render(
 	float* out_normal,
 	float* out_depth,
 	float* out_mdepth,
+	float* out_depth_sigma2,
 	float* accum_coord,
 	float* accum_depth,
 	float* normal_length,
 	bool require_coord,
-	bool require_depth)
+	bool require_depth,
+	bool require_depth_uncertainty)
 {
-#define RENDER_CUDA_CALL(template_coord, template_depth, template_normal) \
-renderCUDA<NUM_CHANNELS, template_coord, template_depth, template_normal> <<<grid, block>>> ( \
+#define RENDER_CUDA_CALL(template_coord, template_depth, template_normal, template_depth_sigma2) \
+renderCUDA<NUM_CHANNELS, template_coord, template_depth, template_normal, template_depth_sigma2> <<<grid, block>>> ( \
 	ranges, point_list, W, H, view_points, means2D, colors, ts, camera_planes, ray_planes, \
 	normals, conic_opacity, focal_x, focal_y, out_alpha, n_contrib, bg_color, out_color, \
-	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, \
+	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, out_depth_sigma2, \
 	accum_coord, accum_depth, normal_length)
 
-	if (require_coord && require_depth)
-		RENDER_CUDA_CALL(true, true, true);
+	if (require_coord && require_depth && require_depth_uncertainty)
+		RENDER_CUDA_CALL(true, true, true, true);
+	else if (require_coord && require_depth && !require_depth_uncertainty)
+		RENDER_CUDA_CALL(true, true, true, false);
 	else if (require_coord && !require_depth)
-		RENDER_CUDA_CALL(true, false, true);
-	else if(!require_coord && require_depth)
-		RENDER_CUDA_CALL(false, true, true);
+		RENDER_CUDA_CALL(true, false, true, false);
+	else if(!require_coord && require_depth && require_depth_uncertainty)
+		RENDER_CUDA_CALL(false, true, true, true);
+	else if(!require_coord && require_depth && !require_depth_uncertainty)
+		RENDER_CUDA_CALL(false, true, true, false);
 	else
-		RENDER_CUDA_CALL(false, false, false);
+		RENDER_CUDA_CALL(false, false, false, false);
 		
 #undef RENDER_CUDA_CALL
 }

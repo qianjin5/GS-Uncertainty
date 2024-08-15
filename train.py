@@ -14,7 +14,7 @@ import json
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from utils.vis_utils import save_images
+from utils.vis_utils import save_images, save_uncertainty_image
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
@@ -149,6 +149,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
         gt_image = viewpoint_cam.original_image.cuda()
 
+        # max value in depth uncertainty
+        #print("rendered_depth_uncertainty", rendered_depth_uncertainty.max().item())
+        #print("rendered_depth", rendered_depth.max().item())
+
         if dataset.use_decoupled_appearance:
             Ll1_render = L1_loss_appearance(rendered_image, gt_image, gaussians, viewpoint_cam.uid)
         else:
@@ -243,6 +247,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gaussians.compute_3D_filter(cameras=trainCameras)
             if iteration % 100 == 0:
                 save_images(scene.model_path + "/images/", iteration, rendered_image, rendered_depth)
+                save_uncertainty_image(scene.model_path + "/images/", iteration, rendered_depth_uncertainty)
 
             # Optimizer step
             if iteration < opt.iterations:

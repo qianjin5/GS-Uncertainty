@@ -80,11 +80,13 @@ namespace FORWARD
 		float* out_normal,
 		float* out_depth,
 		float* out_mdepth,
+		float* out_depth_sigma2,
 		float* accum_coord,
 		float* accum_depth,
 		float* normal_length,
 		bool require_coord,
-		bool require_depth);
+		bool require_depth,
+		bool require_depth_uncertainty);
 
 	//follow code is adopted from GOF for marching tetrahedra https://github.com/autonomousvision/gaussian-opacity-fields
 	// Perform initial steps for each Point prior to integration.

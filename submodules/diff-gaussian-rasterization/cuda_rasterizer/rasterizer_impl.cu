@@ -417,11 +417,13 @@ int CudaRasterizer::Rasterizer::forward(
 		out_normal,
 		out_depth,
 		out_mdepth,
+		out_depth_sigma2,
 		imgState.accum_coord,
 		imgState.accum_depth,
 		imgState.normal_length,
 		require_coord,
-		require_depth), debug);
+		require_depth,
+		require_depth_uncertainty), debug);
 
 	return num_rendered;
 }
