@@ -133,12 +133,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             pipe.debug = True
 
         reg_kick_on = iteration >= opt.regularization_from_iter
+
+        compute_depth = args.use_depth and require_depth and reg_kick_on
+        compute_depth_uncertainty = compute_depth and args.render_depth_uncertainty
         
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, require_coord = require_coord and reg_kick_on, require_depth = args.use_depth and require_depth and reg_kick_on)
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, kernel_size, require_coord = require_coord and reg_kick_on, require_depth = compute_depth, require_depth_uncertainty = compute_depth_uncertainty)
         rendered_image: torch.Tensor
-        rendered_image, rendered_depth, viewspace_point_tensor, visibility_filter, radii = (
+        rendered_image, rendered_depth, rendered_depth_uncertainty, viewspace_point_tensor, visibility_filter, radii = (
                                                                     render_pkg["render"], 
                                                                     render_pkg["expected_depth"], 
+                                                                    render_pkg["expected_depth_uncertainty"],
                                                                     render_pkg["viewspace_points"], 
                                                                     render_pkg["visibility_filter"], 
                                                                     render_pkg["radii"])
@@ -341,6 +345,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str, default=None)
     parser.add_argument('--use_mcmc', type=bool, default=True)
     parser.add_argument('--use_depth', type=bool, default=True)
+    parser.add_argument('--render_depth_uncertainty', type=bool, default=True)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[5_00, 10_000])
@@ -370,6 +375,11 @@ if __name__ == "__main__":
         print("    Using depth")
     else:
         print("    Not using depth")
+
+    if args.render_depth_uncertainty:
+        print("    Rendering depth uncertainty")
+    else:
+        print("    Not rendering depth uncertainty")
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

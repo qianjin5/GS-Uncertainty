@@ -15,7 +15,7 @@
 #include <tuple>
 #include <string>
 	
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -38,6 +38,7 @@ RasterizeGaussiansCUDA(
 	const bool prefiltered,
 	const bool geo_reg,
 	const bool require_depth,
+	const bool require_depth_uncertainty,
 	const bool debug);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -60,6 +61,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& dL_dout_mcoord,
 	const torch::Tensor& dL_dout_depth,
 	const torch::Tensor& dL_dout_mdepth,
+	const torch::Tensor& dL_dout_depth_sigma2,
 	const torch::Tensor& dL_dout_alpha,
 	const torch::Tensor& dL_dout_normal,
 	const torch::Tensor& normalmap,
@@ -73,6 +75,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& alpha,
 	const bool require_coord,
 	const bool require_depth,
+	const bool require_depth_uncertainty,
 	const bool debug);
 		
 torch::Tensor markVisible(

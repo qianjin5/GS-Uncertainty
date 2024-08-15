@@ -54,11 +54,13 @@ namespace CudaRasterizer
 			float* out_mcoord,
 			float* out_depth,
 			float* out_mdepth,
+			float* out_depth_sigma2,
 			float* out_alpha,
 			float* out_normal,
 			int* radii = nullptr,
 			bool require_coord = true,
 			bool require_depth = true,
+			bool require_depth_uncertainty = true,
 			bool debug = false
 			);
 
@@ -89,6 +91,7 @@ namespace CudaRasterizer
 			const float* dL_dpix_mcoord,
 			const float* dL_dpix_depth,
 			const float* dL_dpix_mdepth,
+			const float* dL_dpix_depth_sigma2,
 			const float* dL_dalphas,
 			const float* dL_dpixel_normals,
 			float* dL_dmean2D,
@@ -107,6 +110,7 @@ namespace CudaRasterizer
 			float* dL_drot,
 			bool require_coord = true,
 			bool require_depth = true,
+			bool require_depth_uncertainty = true,
 			bool debug = false);
 		
 		static int integrate(

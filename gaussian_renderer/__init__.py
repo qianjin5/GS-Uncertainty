@@ -16,7 +16,7 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size, scaling_modifier = 1.0, require_coord : bool = True, require_depth : bool = True):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, kernel_size, scaling_modifier = 1.0, require_coord : bool = True, require_depth : bool = True, require_depth_uncertainty : bool = False):
     """
     Render the scene. 
     
@@ -47,6 +47,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         prefiltered=False,
         require_coord = require_coord,
         require_depth = require_depth,
+        require_depth_uncertainty = require_depth_uncertainty,
         debug=pipe.debug
     )
 
@@ -68,7 +69,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     shs = pc.get_features
     colors_precomp = None
 
-    rendered_image, radii, rendered_expected_coord, rendered_median_coord, rendered_expected_depth, rendered_median_depth, rendered_alpha, rendered_normal = rasterizer(
+    rendered_image, radii, rendered_expected_coord, rendered_median_coord, rendered_expected_depth, rendered_median_depth, rendered_expected_depth_uncertainty, rendered_alpha, rendered_normal = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
@@ -88,6 +89,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "median_coord": rendered_median_coord,
             "expected_depth": rendered_expected_depth,
             "median_depth": rendered_median_depth,
+            "expected_depth_uncertainty": rendered_expected_depth_uncertainty,
             "viewspace_points": means2D,
             "visibility_filter" : radii > 0,
             "radii": radii,

@@ -45,6 +45,7 @@ namespace BACKWARD
 		const float* dL_dpixel_mcoords,
 		const float* dL_dpixel_depth,
 		const float* dL_dpixel_mdepth,
+		const float* dL_dpixel_depth_sigma2,
 		const float* dL_dalphas,
 		const float* dL_dpixel_normals,
 		const float* normalmap,
@@ -60,7 +61,8 @@ namespace BACKWARD
 		float2* dL_dray_planes,
 		float* dL_dnormals,
 		bool require_coord,
-		bool require_depth);
+		bool require_depth,
+		bool require_depth_uncertainty);
 
 	void preprocess(
 		int P, int D, int M,

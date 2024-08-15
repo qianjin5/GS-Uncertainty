@@ -277,11 +277,13 @@ int CudaRasterizer::Rasterizer::forward(
 	float* out_mcoord,
 	float* out_depth,
 	float* out_mdepth,
+	float* out_depth_sigma2,
 	float* out_alpha,
 	float* out_normal,
 	int* radii,
 	bool require_coord,
 	bool require_depth,
+	bool require_depth_uncertainty,
 	bool debug
 	)
 {
@@ -453,6 +455,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* dL_dpix_mcoord,
 	const float* dL_dpix_depth,
 	const float* dL_dpix_mdepth,
+	const float* dL_dpix_depth_sigma2,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
 	float* dL_dmean2D,
@@ -471,6 +474,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_drot,
 	bool require_coord,
 	bool require_depth,
+	bool require_depth_uncertainty,
 	bool debug)
 {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
@@ -518,6 +522,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dpix_mcoord,
 		dL_dpix_depth,
 		dL_dpix_mdepth,
+		dL_dpix_depth_sigma2,
 		dL_dalphas,
 		dL_dpixel_normals,
 		normalmap,
@@ -532,7 +537,8 @@ void CudaRasterizer::Rasterizer::backward(
 		(float2*)dL_dray_planes,
 		dL_dnormals,
 		require_coord,
-		require_depth), debug)
+		require_depth,
+		require_depth_uncertainty), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,

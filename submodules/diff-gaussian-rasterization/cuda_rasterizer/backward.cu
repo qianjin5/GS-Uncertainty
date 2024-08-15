@@ -654,6 +654,7 @@ renderCUDA(
 	const float* __restrict__ dL_dpixel_mcoords,
 	const float* __restrict__ dL_dpixel_depths,
 	const float* __restrict__ dL_dpixel_mdepths,
+	const float* __restrict__ dL_dpixel_depths_sigma2,
 	const float* __restrict__ dL_dalphas,
 	const float* __restrict__ dL_dpixel_normals,
 	const float* __restrict__ normalmap,
@@ -1123,6 +1124,7 @@ void BACKWARD::render(
 	const float* dL_dpixel_mcoords,
 	const float* dL_dpixel_depth,
 	const float* dL_dpixel_mdepth,
+	const float* dL_dpixel_depth_sigma2,
 	const float* dL_dalphas,
 	const float* dL_dpixel_normals,
 	const float* normalmap,
@@ -1138,7 +1140,8 @@ void BACKWARD::render(
 	float2* dL_dray_planes,
 	float* dL_dnormals,
 	bool require_coord,
-	bool require_depth)
+	bool require_depth,
+	bool require_depth_uncertainty)
 {
 #define RENDER_CUDA_CALL(template_coord, template_depth, template_normal) \
     renderCUDA<NUM_CHANNELS, template_coord, template_depth, template_normal> <<<grid, block>>> ( \
@@ -1146,7 +1149,7 @@ void BACKWARD::render(
         depths, ts, camera_planes, ray_planes, alphas, normals, \
 		accum_coord, accum_depth, normal_length, \
         n_contrib, dL_dpixels, dL_dpixel_coords, dL_dpixel_mcoords, dL_dpixel_depth, \
-        dL_dpixel_mdepth, dL_dalphas, dL_dpixel_normals, normalmap, \
+        dL_dpixel_mdepth, dL_dpixel_depth_sigma2, dL_dalphas, dL_dpixel_normals, normalmap, \
         focal_x, focal_y, dL_dmean3D, dL_dmean2D, dL_dconic2D, dL_dopacity, dL_dcolors, \
         dL_dts, dL_dcamera_planes, dL_dray_planes, dL_dnormals)
 
