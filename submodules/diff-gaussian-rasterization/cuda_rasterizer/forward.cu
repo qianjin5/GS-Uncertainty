@@ -720,7 +720,7 @@ renderCUDA(
 
 		if constexpr (DEPTH_SIGMA2)
 		{
-			float scale = 1.0 / (ln * weight * weight * weight);
+			float scale = 1.0 / (100000000 * ln * ln * weight * weight * weight); // somehow values are huge
 			if(last_contributor)
 			{
 				// TODO: consider background depth uncertainty with T_U?
