@@ -503,7 +503,6 @@ renderCUDA(
 	float mCoord[3] = { 0 };
 	float Depth = 0;
 	float mDepth = 0;
-	float Depth_exp = 0;
 	float Depth_sigma2 = 0;
 	float Normal[3] = {0};
 	float last_depth = 0;
@@ -635,7 +634,6 @@ renderCUDA(
 		
 		if constexpr (DEPTH_SIGMA2) {
 			
-			Depth_exp = Depth / (ln * weight);
 			// Iterate over current batch again
 			
 			for (int j = 0; !done2 && j < min(BLOCK_SIZE, toDo); j++)
@@ -666,9 +664,7 @@ renderCUDA(
 				float2 ray_plane = collected_ray_planes[j];
 				float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
 
-				float Depth_curr = t / (ln * weight);
-
-				Depth_sigma2 += (Depth_exp - Depth_curr) * (Depth_exp - Depth_curr) * aT;
+				Depth_sigma2 += (Depth - t) * (Depth - t) * aT;
 				
 				T_U = test_T;
 			}
@@ -724,12 +720,13 @@ renderCUDA(
 
 		if constexpr (DEPTH_SIGMA2)
 		{
+			float scale = 1.0 / (ln * weight * weight * weight);
 			if(last_contributor)
 			{
 				// TODO: consider background depth uncertainty with T_U?
 				// how to set the weight?
 				// out_depth_sigma2[pix_id] = (Depth_sigma2 + 1000 * T_U) / weight;
-				out_depth_sigma2[pix_id] = (Depth_sigma2 + 50 * T_U) / weight;
+				out_depth_sigma2[pix_id] = (Depth_sigma2 + 50 * T_U) * scale;
 			}
 			else
 			{
