@@ -473,6 +473,7 @@ renderCUDA(
 	bool inside = pix.x < W&& pix.y < H;
 	// Done threads can help with fetching, but don't rasterize
 	bool done = !inside;
+	bool done2 = !inside;
 
 	// Load start/end range of IDs to process in bit sorted list.
 	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
@@ -492,6 +493,7 @@ renderCUDA(
 
 	// Initialize helper variables
 	float T = 1.0f;
+	float T_U = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	uint32_t max_contributor = -1;
@@ -501,6 +503,7 @@ renderCUDA(
 	float mCoord[3] = { 0 };
 	float Depth = 0;
 	float mDepth = 0;
+	float Depth_exp = 0;
 	float Depth_sigma2 = 0;
 	float Normal[3] = {0};
 	float last_depth = 0;
@@ -511,7 +514,8 @@ renderCUDA(
 	{
 		// End if entire block votes that it is done rasterizing
 		int num_done = __syncthreads_count(done);
-		if (num_done == BLOCK_SIZE)
+		int num_done2 = __syncthreads_count(done2);
+		if (num_done == BLOCK_SIZE && num_done2 == BLOCK_SIZE)
 			break;
 
 		// Collectively fetch per-Gaussian data from global to shared
@@ -630,16 +634,12 @@ renderCUDA(
 		// Now calculate the depth uncertainty along the ray
 		
 		if constexpr (DEPTH_SIGMA2) {
-			done = false;
-			float T_U = 1.0f;
-			float exp_depth = Depth / (ln * weight);
+			
+			Depth_exp = Depth / (ln * weight);
 			// Iterate over current batch again
-			for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
+			
+			for (int j = 0; !done2 && j < min(BLOCK_SIZE, toDo); j++)
 			{
-				if (!last_contributor) {
-					done = true;
-					continue;
-				}
 				// Resample using conic matrix (cf. "Surface 
 				// Splatting" by Zwicker et al., 2001)
 				float2 xy = collected_xy[j];
@@ -656,22 +656,23 @@ renderCUDA(
 				float test_T = T_U * (1 - alpha);
 				if (test_T < 0.0001f)
 				{
-					done = true;
+					done2 = true;
 					continue;
 				}
-
+				
 				const float aT = alpha * T_U;
 
 				float t_center = collected_ts[j];
 				float2 ray_plane = collected_ray_planes[j];
 				float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
 
-				float curr_depth = t / (ln * weight);
+				float Depth_curr = t / (ln * weight);
 
-				Depth_sigma2 += (exp_depth - curr_depth) * (exp_depth - curr_depth) * aT * aT;
-	
+				Depth_sigma2 += (Depth_exp - Depth_curr) * (Depth_exp - Depth_curr) * aT;
+				
 				T_U = test_T;
 			}
+			
 		}
 	}
 
@@ -725,7 +726,10 @@ renderCUDA(
 		{
 			if(last_contributor)
 			{
-				out_depth_sigma2[pix_id] = Depth_sigma2;
+				// TODO: consider background depth uncertainty with T_U?
+				// how to set the weight?
+				// out_depth_sigma2[pix_id] = (Depth_sigma2 + 1000 * T_U) / weight;
+				out_depth_sigma2[pix_id] = (Depth_sigma2 + 50 * T_U) / weight;
 			}
 			else
 			{
