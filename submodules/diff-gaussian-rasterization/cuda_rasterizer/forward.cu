@@ -499,6 +499,7 @@ renderCUDA(
 	uint32_t max_contributor = -1;
 	float C[CHANNELS] = { 0 };
 	float weight = 0;
+	float weight_u = 0;
 	float Coord[3] = { 0 };
 	float mCoord[3] = { 0 };
 	float Depth = 0;
@@ -652,7 +653,7 @@ renderCUDA(
 				if (alpha < 1.0f / 255.0f)
 					continue;
 				float test_T = T_U * (1 - alpha);
-				if (test_T < 0.0001f)
+				if (test_T < 0.001f)
 				{
 					done2 = true;
 					continue;
@@ -666,6 +667,7 @@ renderCUDA(
 
 				Depth_sigma2 += (Depth - t) * (Depth - t) * aT;
 				
+				weight_u += aT;
 				T_U = test_T;
 			}
 			
@@ -720,7 +722,8 @@ renderCUDA(
 
 		if constexpr (DEPTH_SIGMA2)
 		{
-			float scale = 1.0 / (100000000 * ln * ln * weight * weight * weight); // somehow values are huge
+			weight_u += T_U;
+			float scale = 1.0 / (100 * ln * ln * weight_u * weight_u * weight_u); // somehow values are huge
 			if(last_contributor)
 			{
 				// TODO: consider background depth uncertainty with T_U?
