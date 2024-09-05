@@ -33,6 +33,7 @@ namespace CudaRasterizer
 		float* camera_planes;
 		float2* ray_planes;
 		float* ts;
+		float* cov_1d_ray;
 		float3* normals;
 		char* scanning_space;
 		bool* clamped;

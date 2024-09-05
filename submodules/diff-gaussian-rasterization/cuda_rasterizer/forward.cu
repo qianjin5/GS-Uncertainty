@@ -76,7 +76,7 @@ __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const 
 // Forward version of 2D covariance matrix computation
 template<bool INTE = false>
 __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, float kernel_size, const float* cov3D, const float* viewmatrix, 
-							float* cov2D, float* camera_plane, float3* output_normal, float2* ray_plane, float& coef, float* invraycov3Ds = nullptr)
+							float* cov2D, float* camera_plane, float3* output_normal, float2* ray_plane, float& coef, float& cov_1d_ray, float* invraycov3Ds = nullptr)
 {
 	// The following models the steps outlined by equations 29
 	// and 31 in "EWA Splatting" (Zwicker et al., 2002). 
@@ -111,6 +111,9 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 		cov3D[2], cov3D[4], cov3D[5]);
 
 	glm::mat3 cov = glm::transpose(T) * glm::transpose(Vrk) * T;
+	// print cov
+	//printf("cov: %f %f %f %f %f %f %f %f %f", float(cov[0][0]),float(cov[0][1]),float(cov[0][2]),float(cov[1][0]),float(cov[1][1]),float(cov[1][2]),float(cov[2][0]),float(cov[2][1]),float(cov[2][2]));
+
 
 	// output[0] = { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
 	cov2D[0] = float(cov[0][0]);
@@ -158,6 +161,10 @@ __device__ bool computeCov2D(const float3& mean, float focal_x, float focal_y, f
 	glm::vec3 uvh = {txtz, tytz, 1};
 	glm::vec3 uvh_m = cov_cam_inv * uvh;
 	glm::vec3 uvh_mn = glm::normalize(uvh_m);
+
+	glm::vec3 uvh_n = glm::normalize(uvh);
+	cov_1d_ray = 1.0 / max(1.0e-7f, glm::dot(cov_cam_inv * uvh_n, uvh_n));
+	//printf("cov_1d_ray: %f\n", cov_1d_ray);
 
 	if(isnan(uvh_mn.x)|| D==0)
 	{
@@ -328,6 +335,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float* depths,
 	float* camera_planes,
 	float2* ray_planes,
+	float* cov_1d_ray,
 	float3* normals,
 	float* cov3Ds,
 	float* rgb,
@@ -373,12 +381,15 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Compute 2D screen-space covariance matrix
 	float cov2D[3];
 	float ceof;
-	bool condition = computeCov2D<INTE>(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, kernel_size, cov3D, viewmatrix, cov2D, camera_planes + idx * 6, normals + idx, ray_planes + idx, ceof, invraycov3Ds + idx * 6);
+	float cov_1d_ray_i;
+	bool condition = computeCov2D<INTE>(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, kernel_size, cov3D, viewmatrix, cov2D, camera_planes + idx * 6, normals + idx, ray_planes + idx, ceof, cov_1d_ray_i, invraycov3Ds + idx * 6);
 	if constexpr (INTE)
 	{
 		conditions[idx] = condition;
 	}
 	ts[idx] = sqrt(p_view.x*p_view.x+p_view.y*p_view.y+p_view.z*p_view.z);
+	cov_1d_ray[idx] = cov_1d_ray_i;
+
 	const float3 cov = {cov2D[0], cov2D[1], cov2D[2]};
 	
 	// Invert covariance (EWA algorithm)
@@ -437,6 +448,7 @@ renderCUDA(
 	const float* __restrict__ ts,
 	const float* __restrict__ camera_planes,
 	const float2* __restrict__ ray_planes,
+	const float* __restrict__ cov_1d_ray,
 	const float3* __restrict__ normals,
 	const float4* __restrict__ conic_opacity,
 	const float focal_x, 
@@ -488,6 +500,7 @@ renderCUDA(
 	__shared__ float collected_mean3d[BLOCK_SIZE * 3];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_ts[BLOCK_SIZE];
+	__shared__ float collected_cov_1d_ray[BLOCK_SIZE];
 	__shared__ float2 collected_ray_planes[BLOCK_SIZE];
 	__shared__ float3 collected_normals[BLOCK_SIZE];
 
@@ -539,6 +552,10 @@ renderCUDA(
 			{
 				collected_ts[block.thread_rank()] = ts[coll_id];
 				collected_ray_planes[block.thread_rank()] = ray_planes[coll_id];
+			}
+			if constexpr (DEPTH_SIGMA2)
+			{
+				collected_cov_1d_ray[block.thread_rank()] = cov_1d_ray[coll_id];
 			}
 			if constexpr (NORMAL)
 			{
@@ -661,11 +678,16 @@ renderCUDA(
 				
 				const float aT = alpha * T_U;
 
+				float cov_1d_ray_j = collected_cov_1d_ray[j];
+				//printf("cov_1d_ray_j: %f\n", cov_1d_ray_j);
+
 				float t_center = collected_ts[j];
 				float2 ray_plane = collected_ray_planes[j];
 				float t = t_center + (ray_plane.x * d.x + ray_plane.y * d.y);
 
-				Depth_sigma2 += (Depth - t) * (Depth - t) * aT;
+				//Depth_sigma2 += (Depth - t) * (Depth - t) * aT;
+				//Depth_sigma2 += cov_1d_ray_j * aT;
+				Depth_sigma2 += cov_1d_ray_j * aT * aT;
 				
 				weight_u += aT;
 				T_U = test_T;
@@ -723,13 +745,16 @@ renderCUDA(
 		if constexpr (DEPTH_SIGMA2)
 		{
 			weight_u += T_U;
-			float scale = 1.0 / (100 * ln * ln * weight_u * weight_u * weight_u); // somehow values are huge
+			float scale = 1.0 / (weight_u * weight_u); // somehow values are huge
+			//printf("scale: %f\n", scale);
+			//printf("ln: %f\n", ln);
+			//printf("weight_u: %f\n", weight_u);
 			if(last_contributor)
 			{
 				// TODO: consider background depth uncertainty with T_U?
 				// how to set the weight?
 				// out_depth_sigma2[pix_id] = (Depth_sigma2 + 1000 * T_U) / weight;
-				out_depth_sigma2[pix_id] = (Depth_sigma2 + 50 * T_U) * scale;
+				out_depth_sigma2[pix_id] = (Depth_sigma2 + T_U) * scale;
 			}
 			else
 			{
@@ -769,6 +794,7 @@ void FORWARD::render(
 	const float* ts,
 	const float* camera_planes,
 	const float2* ray_planes,
+	const float* cov_1d_ray,
 	const float3* normals,
 	const float4* conic_opacity,
 	const float focal_x, float focal_y,
@@ -792,7 +818,7 @@ void FORWARD::render(
 #define RENDER_CUDA_CALL(template_coord, template_depth, template_normal, template_depth_sigma2) \
 renderCUDA<NUM_CHANNELS, template_coord, template_depth, template_normal, template_depth_sigma2> <<<grid, block>>> ( \
 	ranges, point_list, W, H, view_points, means2D, colors, ts, camera_planes, ray_planes, \
-	normals, conic_opacity, focal_x, focal_y, out_alpha, n_contrib, bg_color, out_color, \
+	cov_1d_ray, normals, conic_opacity, focal_x, focal_y, out_alpha, n_contrib, bg_color, out_color, \
 	out_coord, out_mcoord, out_normal, out_depth, out_mdepth, out_depth_sigma2, \
 	accum_coord, accum_depth, normal_length)
 
@@ -835,6 +861,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* depths,
 	float* camera_planes,
 	float2* ray_planes,
+	float* cov_1d_ray,
 	float* ts,
 	float3* normals,
 	float* cov3Ds,
@@ -872,6 +899,7 @@ void FORWARD::preprocess(int P, int D, int M,
 			depths,
 			camera_planes,
 			ray_planes,
+			cov_1d_ray,
 			normals,
 			cov3Ds,
 			rgb,
@@ -908,6 +936,7 @@ void FORWARD::preprocess(int P, int D, int M,
 			depths,
 			camera_planes,
 			ray_planes,
+			cov_1d_ray,
 			normals,
 			cov3Ds,
 			rgb,

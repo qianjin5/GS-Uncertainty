@@ -194,6 +194,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.camera_planes, P * 6, 128);
 	obtain(chunk, geom.ray_planes, P, 128);
 	obtain(chunk, geom.ts, P, 128);
+	obtain(chunk, geom.cov_1d_ray, P, 128);
 	obtain(chunk, geom.normals, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
@@ -336,6 +337,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.depths,
 		geomState.camera_planes,
 		geomState.ray_planes,
+		geomState.cov_1d_ray,
 		geomState.ts,
 		geomState.normals,
 		geomState.cov3D,
@@ -405,6 +407,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.ts,
 		geomState.camera_planes,
 		geomState.ray_planes,
+		geomState.cov_1d_ray,
 		geomState.normals,
 		geomState.conic_opacity,
 		focal_x, focal_y,
@@ -664,6 +667,7 @@ int CudaRasterizer::Rasterizer::integrate(
 		geomState.depths,
 		geomState.camera_planes,
 		geomState.ray_planes,
+		geomState.cov_1d_ray,
 		geomState.ts,
 		geomState.normals,
 		geomState.cov3D,
